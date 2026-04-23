@@ -89,18 +89,15 @@ def notify():
 @app.post("/webhook")
 def webhook():
     body = request.get_json(force=True)
-    
-    app.logger.info(f"Webhook received: {body}") 
+    app.logger.info(f"Webhook received: {body}")
 
     step     = body.get("step", "")
     status   = body.get("status", "")
     file_ids = body.get("fileIds", [])
 
-    # 対象イベント以外は即座に 200 を返して無視
     if step != "processing_finished" or status != "completed":
         return jsonify(ok=True, skipped=True)
 
-    # fileIds が文字列で来るケースも吸収
     if isinstance(file_ids, str):
         file_ids = [file_ids]
 
@@ -108,10 +105,19 @@ def webhook():
     for file_id in file_ids:
         try:
             file_name = get_file_name(file_id)
+            app.logger.info(f"file_id: {file_id}, file_name: {file_name}")  # ← 確認用
+
             detail_url = (
                 f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
             )
             blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "📣Notification from file AI!!",  # ← 追加
+                    },
+                },
                 {
                     "type": "section",
                     "text": {
@@ -127,9 +133,10 @@ def webhook():
                         "url": detail_url,
                         "style": "primary",
                     },
-                }
+                },
             ]
             fallback = (
+                f"📣Notification from file AI!!\n"
                 f"{file_name} has been processed. "
                 f"Please click this link for more details: {detail_url}"
             )
@@ -142,7 +149,6 @@ def webhook():
         return jsonify(ok=False, errors=errors), 500
 
     return jsonify(ok=True)
-
 
 if __name__ == "__main__":
     app.run(debug=True)
