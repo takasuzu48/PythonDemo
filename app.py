@@ -149,8 +149,9 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
     resp.raise_for_status()
     data = resp.json()
 
-    upload_url = data.get("uploadUrl") or data.get("url")
-    print(f"fileAI upload - uploadUrl: {upload_url}", flush=True)
+    # presignedUploadURL に修正
+    upload_url = data.get("presignedUploadURL")
+    print(f"fileAI upload - presignedUploadURL: {upload_url}", flush=True)
 
     if upload_url:
         print(f"fileAI PUT - starting upload, size: {len(file_content)} bytes", flush=True)
@@ -164,7 +165,7 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
         print(f"fileAI PUT - response body: {put_resp.text}", flush=True)
         put_resp.raise_for_status()
     else:
-        print(f"fileAI upload - uploadUrl not found: {data}", flush=True)
+        print(f"fileAI upload - presignedUploadURL not found: {data}", flush=True)
 
     return data
 
