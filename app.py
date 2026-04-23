@@ -317,19 +317,18 @@ def slack_events():
             result = upload_to_fileai(file_content, file_name, file_type)
             print(f"fileAI upload result: {result}", flush=True)
 
-            # Bot A でアップロード通知
             post_to_slack(
                 f"⏳ *{file_name}* をfileAIにアップロードしました。処理完了後に通知します。",
-                token=SLACK_TOKEN,
-                channel=SLACK_CHANNEL,
+                token=SLACK_TOKEN_B,      # ← B に変更
+                channel=SLACK_CHANNEL_B,  # ← B に変更
             )
 
         except Exception as e:
             print(f"Error processing file {file_name}: {e}", flush=True)
             post_to_slack(
                 f"❌ *{file_name}* のアップロードに失敗しました。\nエラー: {str(e)}",
-                token=SLACK_TOKEN,
-                channel=SLACK_CHANNEL,
+                token=SLACK_TOKEN_B,      # ← B に変更
+                channel=SLACK_CHANNEL_B,  # ← B に変更
             )
 
     return jsonify(ok=True)
