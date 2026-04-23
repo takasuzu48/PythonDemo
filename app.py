@@ -35,7 +35,6 @@ def get_file_name(file_id: str) -> str:
     url = f"https://api.orion.file.ai/prod/v1/files/{file_id}/values"
     
     print(f"fileAI API request - url: {url}", flush=True)
-    print(f"fileAI API request - api_key(先頭10文字): {FILEAI_API_KEY[:10]}...", flush=True)
     
     resp = requests.get(
         url,
@@ -44,14 +43,18 @@ def get_file_name(file_id: str) -> str:
     )
     
     print(f"fileAI API response - status: {resp.status_code}", flush=True)
-    print(f"fileAI API response - body: {resp.text}", flush=True)
     
     resp.raise_for_status()
     data = resp.json()
     
-    print(f"fileAI API parsed - data: {data}", flush=True)
+    form_values = data.get("formValues", [])
+    if not form_values:
+        print(f"formValues is empty - fallback to file_id", flush=True)
+        return file_id
     
-    return data.get("fileName", file_id)
+    file_name = form_values[0].get("fileName", file_id)  # ← ここを修正
+    print(f"file_name: {file_name}", flush=True)
+    return file_name
     
 
 
