@@ -87,6 +87,8 @@ def notify():
 @app.post("/webhook")
 def webhook():
     body = request.get_json(force=True)
+    
+    app.logger.info(f"Webhook received: {body}") 
 
     step     = body.get("step", "")
     status   = body.get("status", "")
