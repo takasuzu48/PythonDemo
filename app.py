@@ -76,13 +76,13 @@ def verify_slack_signature(req) -> bool:
     timestamp = req.headers.get("X-Slack-Request-Timestamp", "")
     slack_signature = req.headers.get("X-Slack-Signature", "")
 
-    if abs(time.time() - int(timestamp)) > 300:
+    if not timestamp or abs(time.time() - int(timestamp)) > 300:
         return False
 
     sig_basestring = f"v0:{timestamp}:{req.get_data(as_text=True)}"
     my_signature = (
         "v0="
-        + hmac.new(
+        + hmac.HMAC(
             signing_secret,
             sig_basestring.encode("utf-8"),
             hashlib.sha256,
