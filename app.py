@@ -70,16 +70,17 @@ def get_file_name(file_id: str) -> str:
     return file_name
 
 
-# ── Slack リクエストの署名検証 ────────────────────────────
-def verify_slack_signature(req) -> bool:
+# ── 署名検証（raw_bodyを直接受け取る版）─────────────────
+def verify_slack_signature_raw(raw_body: bytes, headers) -> bool:
     signing_secret = SLACK_SIGNING_SECRET.encode("utf-8")
-    timestamp = req.headers.get("X-Slack-Request-Timestamp", "")
-    slack_signature = req.headers.get("X-Slack-Signature", "")
+    timestamp = headers.get("X-Slack-Request-Timestamp", "")
+    slack_signature = headers.get("X-Slack-Signature", "")
 
     if not timestamp or abs(time.time() - int(timestamp)) > 300:
+        print(f"★ timestamp check failed: {timestamp}", flush=True)
         return False
 
-    sig_basestring = f"v0:{timestamp}:{req.get_data(as_text=True)}"
+    sig_basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}"
     my_signature = (
         "v0="
         + hmac.HMAC(
@@ -88,6 +89,10 @@ def verify_slack_signature(req) -> bool:
             hashlib.sha256,
         ).hexdigest()
     )
+
+    print(f"★ my_signature: {my_signature}", flush=True)
+    print(f"★ slack_signature: {slack_signature}", flush=True)
+
     return hmac.compare_digest(my_signature, slack_signature)
 
 
@@ -271,33 +276,27 @@ def webhook():
 # ── ④ Ver2：Slack Events API ──────────────────────────────
 @app.post("/slack/events")
 def slack_events():
-    raw_body = request.get_data(as_text=True)
+    raw_body = request.get_data()  # ← bytesで先に読み切る
     print(f"★ /slack/events called", flush=True)
     print(f"★ raw_body: {raw_body}", flush=True)
-    print(f"★ headers: {dict(request.headers)}", flush=True)
 
     body = request.get_json(force=True)
 
-    # URL検証（初回設定時）
     if body.get("type") == "url_verification":
         return jsonify(challenge=body["challenge"])
 
-    # 署名検証
-    if not verify_slack_signature(request):
+    # 署名検証にraw_bodyを直接渡す
+    if not verify_slack_signature_raw(raw_body, request.headers):
         print(f"★ signature verification failed", flush=True)
         return jsonify(error="invalid signature"), 403
 
     event = body.get("event", {})
-    print(f"★ event type: {event.get('type')}", flush=True)
-    print(f"★ event keys: {list(event.keys())}", flush=True)
+    print(f"★ event: {event}", flush=True)
     print(f"★ has files: {'files' in event}", flush=True)
-    print(f"★ full event: {event}", flush=True)
 
     if event.get("type") != "message" or "files" not in event:
         print(f"★ skipped - type:{event.get('type')} has_files:{'files' in event}", flush=True)
         return jsonify(ok=True)
-
-    # 以下はそのまま...
 
     for file_info in event.get("files", []):
         file_id      = file_info.get("id")
@@ -319,6 +318,7 @@ def slack_events():
             post_to_slack(f"❌ *{file_name}* のアップロードに失敗しました。\nエラー: {str(e)}")
 
     return jsonify(ok=True)
+
 
 
 if __name__ == "__main__":
