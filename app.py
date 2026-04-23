@@ -32,16 +32,24 @@ def post_to_slack(text, blocks=None):
 
 
 def get_file_name(file_id: str) -> str:
-    """fileAI API からファイル名を取得する"""
     url = f"https://api.orion.file.ai/prod/v1/files/{file_id}/values"
+    
+    app.logger.info(f"fileAI API request - url: {url}")
+    app.logger.info(f"fileAI API request - api_key(先頭10文字): {FILEAI_API_KEY[:10]}...")
+    
     resp = requests.get(
         url,
-        headers={"Authorization": f"x-api-key {FILEAI_API_KEY}"},
+        headers={"x-api-key": FILEAI_API_KEY},
         timeout=10,
     )
+    
+    app.logger.info(f"fileAI API response - status: {resp.status_code}")
+    app.logger.info(f"fileAI API response - body: {resp.text}")
+    
     resp.raise_for_status()
     data = resp.json()
-    return data.get("fileName", file_id)   # 取得できなければ fileId をフォールバック
+    return data.get("fileName", file_id)
+    
 
 
 # ── ① 接続確認（Ver1 から継続） ──────────────────────────
