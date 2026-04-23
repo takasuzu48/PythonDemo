@@ -1,4 +1,7 @@
 import os
+import hmac
+import hashlib
+import time
 import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -8,55 +11,141 @@ load_dotenv()
 
 app = Flask(__name__)
 
-SLACK_TOKEN    = os.environ["SLACK_BOT_TOKEN"]
-SLACK_CHANNEL  = os.environ["SLACK_CHANNEL_ID"]
-FILEAI_API_KEY = os.environ["FILEAI_API_KEY"]   # fileAI のAPIキー（後述）
+SLACK_TOKEN          = os.environ["SLACK_BOT_TOKEN"]
+SLACK_CHANNEL        = os.environ["SLACK_CHANNEL_ID"]
+SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
+FILEAI_API_KEY       = os.environ["FILEAI_API_KEY"]
+FILEAI_DIRECTORY_ID  = os.environ.get("FILEAI_DIRECTORY_ID", "")
+RENDER_BASE_URL      = os.environ["RENDER_BASE_URL"]  # 例: https://slack-notifier-xxxx.onrender.com
 JST = timezone(timedelta(hours=9))
 
 
-def post_to_slack(text, blocks=None):
-    payload = {"channel": SLACK_CHANNEL, "text": text}
-    if blocks:
-        payload["blocks"] = blocks
-    resp = requests.post(
-        "https://slack.com/api/chat.postMessage",
+# ── Slack リクエストの署名検証 ────────────────────────────
+def verify_slack_signature(req) -> bool:
+    signing_secret = SLACK_SIGNING_SECRET.encode("utf-8")
+    timestamp = req.headers.get("X-Slack-Request-Timestamp", "")
+    slack_signature = req.headers.get("X-Slack-Signature", "")
+
+    # リプレイアタック防止（5分以上古いリクエストを拒否）
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+
+    sig_basestring = f"v0:{timestamp}:{req.get_data(as_text=True)}"
+    my_signature = (
+        "v0="
+        + hmac.new(
+            signing_secret,
+            sig_basestring.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+    )
+    return hmac.compare_digest(my_signature, slack_signature)
+
+
+# ── Slack からファイルをダウンロード ─────────────────────
+def download_slack_file(url: str) -> bytes:
+    resp = requests.get(
+        url,
         headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
-        json=payload,
-        timeout=10,
+        timeout=30,
     )
     resp.raise_for_status()
+    return resp.content
+
+
+# ── fileAI にアップロード ─────────────────────────────────
+def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
+    # Step1: アップロード用の署名付きURLを取得
+    payload = {
+        "fileName":    file_name,
+        "fileType":    file_type,
+        "isSplit":     False,
+        "isSplitExcel": False,
+        "callbackURL": f"{RENDER_BASE_URL}/webhook",  # 既存のwebhookエンドポイント
+        "ocrModel":    "Beethoven_ENG_O5.6",
+        "schemaLocking": False,
+        "isEphemeral": False,
+    }
+    if FILEAI_DIRECTORY_ID:
+        payload["directoryId"] = FILEAI_DIRECTORY_ID
+
+    print(f"fileAI upload request payload: {payload}", flush=True)
+
+    resp = requests.post(
+        "https://api.orion.file.ai/prod/v1/files/upload",
+        headers={
+            "x-api-key":    FILEAI_API_KEY,
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    print(f"fileAI upload response - status: {resp.status_code}", flush=True)
+    print(f"fileAI upload response - body: {resp.text}", flush=True)
+
+    resp.raise_for_status()
     data = resp.json()
-    if not data.get("ok"):
-        raise RuntimeError(f"Slack API error: {data.get('error')}")
+
+    # Step2: 署名付きURLにファイルをPUT
+    upload_url = data.get("uploadUrl") or data.get("url")
+    if upload_url:
+        put_resp = requests.put(
+            upload_url,
+            data=file_content,
+            headers={"Content-Type": file_type},
+            timeout=60,
+        )
+        print(f"fileAI PUT response - status: {put_resp.status_code}", flush=True)
+        put_resp.raise_for_status()
+
     return data
 
 
-def get_file_name(file_id: str) -> str:
-    url = f"https://api.orion.file.ai/prod/v1/files/{file_id}/values"
-    
-    print(f"fileAI API request - url: {url}", flush=True)
-    
-    resp = requests.get(
-        url,
-        headers={"x-api-key": FILEAI_API_KEY},
-        timeout=10,
-    )
-    
-    print(f"fileAI API response - status: {resp.status_code}", flush=True)
-    
-    resp.raise_for_status()
-    data = resp.json()
-    
-    form_values = data.get("formValues", [])
-    if not form_values:
-        print(f"formValues is empty - fallback to file_id", flush=True)
-        return file_id
-    
-    file_name = form_values[0].get("fileName", file_id)  # ← ここを修正
-    print(f"file_name: {file_name}", flush=True)
-    return file_name
-    
+# ── Slack Events API ──────────────────────────────────────
+@app.post("/slack/events")
+def slack_events():
+    # URL検証（初回設定時にSlackから送られてくる）
+    body = request.get_json(force=True)
+    if body.get("type") == "url_verification":
+        return jsonify(challenge=body["challenge"])
 
+    # 署名検証
+    if not verify_slack_signature(request):
+        return jsonify(error="invalid signature"), 403
+
+    event = body.get("event", {})
+    print(f"Slack event received: {event}", flush=True)
+
+    # ファイルが添付されたメッセージのみ処理
+    if event.get("type") != "message" or "files" not in event:
+        return jsonify(ok=True)
+
+    for file_info in event.get("files", []):
+        file_id       = file_info.get("id")
+        file_name     = file_info.get("name", "unknown")
+        file_type     = file_info.get("mimetype", "application/octet-stream")
+        download_url  = file_info.get("url_private_download")
+
+        print(f"Processing file - id:{file_id} name:{file_name} type:{file_type}", flush=True)
+
+        try:
+            # Slackからファイルをダウンロード
+            file_content = download_slack_file(download_url)
+            print(f"Downloaded file size: {len(file_content)} bytes", flush=True)
+
+            # fileAIにアップロード
+            result = upload_to_fileai(file_content, file_name, file_type)
+            print(f"fileAI upload result: {result}", flush=True)
+
+            # アップロード完了をSlackに通知
+            post_to_slack(f"⏳ *{file_name}* をfileAIにアップロードしました。処理完了後に通知します。")
+
+        except Exception as e:
+            print(f"Error processing file {file_name}: {e}", flush=True)
+            post_to_slack(f"❌ *{file_name}* のアップロードに失敗しました。\nエラー: {str(e)}")
+
+    return jsonify(ok=True)
 
 # ── ① 接続確認（Ver1 から継続） ──────────────────────────
 @app.post("/hello")
