@@ -271,6 +271,11 @@ def webhook():
 # ── ④ Ver2：Slack Events API ──────────────────────────────
 @app.post("/slack/events")
 def slack_events():
+    raw_body = request.get_data(as_text=True)
+    print(f"★ /slack/events called", flush=True)
+    print(f"★ raw_body: {raw_body}", flush=True)
+    print(f"★ headers: {dict(request.headers)}", flush=True)
+
     body = request.get_json(force=True)
 
     # URL検証（初回設定時）
@@ -279,14 +284,20 @@ def slack_events():
 
     # 署名検証
     if not verify_slack_signature(request):
+        print(f"★ signature verification failed", flush=True)
         return jsonify(error="invalid signature"), 403
 
     event = body.get("event", {})
-    print(f"Slack event received: {event}", flush=True)
+    print(f"★ event type: {event.get('type')}", flush=True)
+    print(f"★ event keys: {list(event.keys())}", flush=True)
+    print(f"★ has files: {'files' in event}", flush=True)
+    print(f"★ full event: {event}", flush=True)
 
-    # ファイルが添付されたメッセージのみ処理
     if event.get("type") != "message" or "files" not in event:
+        print(f"★ skipped - type:{event.get('type')} has_files:{'files' in event}", flush=True)
         return jsonify(ok=True)
+
+    # 以下はそのまま...
 
     for file_info in event.get("files", []):
         file_id      = file_info.get("id")
