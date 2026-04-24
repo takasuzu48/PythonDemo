@@ -145,16 +145,13 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
         put_resp = requests.put(
             upload_url,
             data=file_content,
-            headers={
-                "Content-Type": file_type,
-                "x-amz-checksum-crc32": "AAAAAA==",
-                "x-amz-sdk-checksum-algorithm": "CRC32",
-            },
+            headers={"Content-Type": file_type},  # ← Content-Typeのみ
             timeout=60,
         )
         print(f"fileAI PUT - status: {put_resp.status_code}", flush=True)
         print(f"fileAI PUT - response body: {put_resp.text}", flush=True)
         put_resp.raise_for_status()
+        
     else:
         print(f"fileAI upload - presignedUploadURL not found in response", flush=True)
 
