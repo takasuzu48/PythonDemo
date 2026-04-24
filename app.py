@@ -161,15 +161,21 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
 
 # ── ファイル処理をバックグラウンドで実行 ─────────────────
 def process_file_background(file_info: dict):
+    print(f"[BG] file_info full: {file_info}", flush=True)  # ← 全フィールドを確認
+
     file_id      = file_info.get("id")
     file_name    = file_info.get("name", "unknown")
     file_type    = file_info.get("mimetype", "application/octet-stream")
-
-    # url_private_download → url_private に変更（オリジナルサイズ）
     download_url = file_info.get("url_private") or file_info.get("url_private_download")
 
-    print(f"[BG] Processing file - id:{file_id} name:{file_name} type:{file_type}", flush=True)
+    print(f"[BG] file_id: {file_id}", flush=True)
+    print(f"[BG] file_name: {file_name}", flush=True)
+    print(f"[BG] file_type: {file_type}", flush=True)
+    print(f"[BG] file_size: {file_info.get('size')}", flush=True)  # Slackが返すサイズ
     print(f"[BG] download_url: {download_url}", flush=True)
+    print(f"[BG] url_private: {file_info.get('url_private')}", flush=True)
+    print(f"[BG] url_private_download: {file_info.get('url_private_download')}", flush=True)
+    print(f"[BG] permalink: {file_info.get('permalink')}", flush=True)
 
     # 以下はそのまま
 
