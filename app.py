@@ -90,6 +90,38 @@ def verify_slack_signature(req) -> bool:
     )
     return hmac.compare_digest(my_signature, slack_signature)
 
+# ── Slack からファイルをダウンロード ─────────────────────
+def download_slack_file_by_id(file_id: str) -> tuple[bytes, str]:
+    """files.info APIでファイル情報を取得してダウンロード"""
+    print(f"Fetching file info for file_id: {file_id}", flush=True)
+
+    info_resp = requests.get(
+        "https://slack.com/api/files.info",
+        headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+        params={"file": file_id},
+        timeout=10,
+    )
+    info_resp.raise_for_status()
+    info = info_resp.json()
+
+    print(f"files.info response: {info.get('file', {}).get('size')} bytes", flush=True)
+
+    file_obj     = info.get("file", {})
+    download_url = file_obj.get("url_private_download")
+    file_type    = file_obj.get("mimetype", "application/octet-stream")
+
+    print(f"files.info download_url: {download_url}", flush=True)
+
+    resp = requests.get(
+        download_url,
+        headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+        timeout=30,
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+
+    print(f"files.info download size: {len(resp.content)} bytes", flush=True)
+    return resp.content, file_type
 
 # ── Slack からファイルをダウンロード ─────────────────────
 def download_slack_file(url: str) -> bytes:
@@ -170,21 +202,17 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
 
 # ── ファイル処理をバックグラウンドで実行 ─────────────────
 def process_file_background(file_info: dict):
-    print(f"[BG] file_info full: {file_info}", flush=True)
+    file_id   = file_info.get("id")
+    file_name = file_info.get("name", "unknown")
 
-    file_id      = file_info.get("id")
-    file_name    = file_info.get("name", "unknown")
-    file_type    = file_info.get("mimetype", "application/octet-stream")
-    download_url = file_info.get("url_private_download")  # ← url_private ではなく url_private_download を使う
-
-    print(f"[BG] file_id: {file_id}", flush=True)
-    print(f"[BG] file_name: {file_name}", flush=True)
-    print(f"[BG] file_type: {file_type}", flush=True)
-    print(f"[BG] file_size: {file_info.get('size')}", flush=True)
-    print(f"[BG] download_url（使用するURL）: {download_url}", flush=True)  # ← /download/ が含まれているか確認
+    print(f"[BG] Processing file - id:{file_id} name:{file_name}", flush=True)
 
     try:
-        file_content = download_slack_file(download_url)
+        # files.info API経由でダウンロード（確実にオリジナルサイズを取得）
+        file_content, file_type = download_slack_file_by_id(file_id)
+
+        print(f"[BG] Downloaded size: {len(file_content)} bytes (expected: {file_info.get('size')})", flush=True)
+
         result = upload_to_fileai(file_content, file_name, file_type)
         print(f"[BG] fileAI upload result: {result}", flush=True)
         post_to_slack(f"⏳ *{file_name}* をfileAIにアップロードしました。処理完了後に通知します。")
