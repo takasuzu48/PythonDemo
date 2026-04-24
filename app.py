@@ -44,7 +44,7 @@ def post_to_slack(text, blocks=None):
     return data
 
 # ── Post message to Slack B ─────────────────────────────────
-def post_to_slack(text, blocks=None):
+def post_to_slack_B(text, blocks=None):
     payload = {"channel": SLACK_CHANNEL_B, "text": text}
     if blocks:
         payload["blocks"] = blocks
@@ -351,7 +351,7 @@ def webhook():
                 f"{file_name} has been processed. "
                 f"Please click this link for more details: {detail_url}"
             )
-            post_to_slack(fallback, blocks)
+            post_to_slack_B(fallback, blocks)
 
         except Exception as e:
             print(f"Error for file_id {file_id}: {e}", flush=True)
