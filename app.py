@@ -94,14 +94,23 @@ def verify_slack_signature(req) -> bool:
 # ── Slack からファイルをダウンロード ─────────────────────
 def download_slack_file(url: str) -> bytes:
     print(f"Downloading file from Slack - url: {url}", flush=True)
-    resp = requests.get(
-        url,
-        headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
-        timeout=30,
-    )
+
+    session = requests.Session()
+    session.headers.update({"Authorization": f"Bearer {SLACK_TOKEN}"})
+
+    resp = session.get(url, timeout=30, allow_redirects=True)
+
     print(f"Slack download - status: {resp.status_code}", flush=True)
-    resp.raise_for_status()
+    print(f"Slack download - final url: {resp.url}", flush=True)
+    print(f"Slack download - content-type: {resp.headers.get('Content-Type')}", flush=True)
     print(f"Slack download - file size: {len(resp.content)} bytes", flush=True)
+
+    resp.raise_for_status()
+
+    # サイズが期待より小さい場合はfiles.info APIで再取得
+    file_id = url.split("/")[5].split("-")[1] if "/files-pri/" in url else None
+    print(f"Slack download - extracted file_id: {file_id}", flush=True)
+
     return resp.content
 
 
