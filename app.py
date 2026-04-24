@@ -113,7 +113,7 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
         "isSplit":       False,
         "isSplitExcel":  False,
         "callbackURL":   f"{RENDER_BASE_URL}/webhook",
-        "ocrModel":      "Beethoven_ENG_",
+        "ocrModel":      "Beethoven_ENG_GP25.2",
         "schemaLocking": False,
         "isEphemeral":   False,
         "schemaId":      os.environ.get("FILEAI_SCHEMA_ID", ""),  # ← 追加
