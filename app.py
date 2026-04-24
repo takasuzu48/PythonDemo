@@ -239,12 +239,13 @@ def webhook():
     errors = []
     for file_id in file_ids:
         try:
-            file_name = get_file_name(file_id)
-            print(f"file_id: {file_id}, file_name: {file_name}", flush=True)
+            file_name  = get_file_name(file_id)
+            detail_url = f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
 
-            detail_url = (
-                f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
-            )
+            print(f"file_id: {file_id}", flush=True)
+            print(f"file_name: {file_name}", flush=True)
+            print(f"detail_url: {detail_url}", flush=True)  # ← URL確認
+
             blocks = [
                 {
                     "type": "section",
@@ -259,12 +260,17 @@ def webhook():
                             f"Please click this link for more details."
                         ),
                     },
-                    "accessory": {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "View details →"},
-                        "url": detail_url,
-                        "style": "primary",
-                    },
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "View details →"},
+                            "url": detail_url,   # ← accessory から actions ブロックに移動
+                            "action_id": "view_details",
+                        }
+                    ],
                 },
             ]
             fallback = (
