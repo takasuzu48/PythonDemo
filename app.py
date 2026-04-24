@@ -60,7 +60,6 @@ def post_to_slack_B(text, blocks=None):
         raise RuntimeError(f"Slack API error: {data.get('error')}")
     return data
 
-
 # ── Get file name from fileAI API ─────────────────────────
 def get_file_name(file_id: str) -> str:
     url = f"https://api.orion.file.ai/prod/v1/files/{file_id}/values"
@@ -352,6 +351,8 @@ def webhook():
                 f"Please click this link for more details: {detail_url}"
             )
             post_to_slack_B(fallback, blocks)
+            post_to_slack(f"🗒️ The process is complete.")
+
 
         except Exception as e:
             print(f"Error for file_id {file_id}: {e}", flush=True)
