@@ -163,9 +163,14 @@ def process_file_background(file_info: dict):
     file_id      = file_info.get("id")
     file_name    = file_info.get("name", "unknown")
     file_type    = file_info.get("mimetype", "application/octet-stream")
-    download_url = file_info.get("url_private_download")
 
-    print(f"[BG] Processing file - id:{file_id} name:{file_name}", flush=True)
+    # url_private_download → url_private に変更（オリジナルサイズ）
+    download_url = file_info.get("url_private") or file_info.get("url_private_download")
+
+    print(f"[BG] Processing file - id:{file_id} name:{file_name} type:{file_type}", flush=True)
+    print(f"[BG] download_url: {download_url}", flush=True)
+
+    # 以下はそのまま
 
     try:
         file_content = download_slack_file(download_url)
