@@ -223,30 +223,39 @@ def webhook():
     raw_body = request.get_data(as_text=True)
     print(f"Webhook raw body: {raw_body}", flush=True)
 
-    body     = request.get_json(force=True)
-    step     = body.get("step", "")
-    status   = body.get("status", "")
-    file_ids = body.get("fileIds", [])
+    body      = request.get_json(force=True)
+    step      = body.get("step", "")
+    status    = body.get("status", "")
+    file_ids  = body.get("fileIds", [])
+    upload_id = body.get("uploadId", "")  # ← uploadId も取得
 
-    print(f"Webhook - step:{step} status:{status} file_ids:{file_ids}", flush=True)
+    print(f"Webhook - step:{step} status:{status} file_ids:{file_ids} upload_id:{upload_id}", flush=True)
 
     if step != "processing_finished" or status != "completed":
         print(f"Webhook - skipped. step={step}, status={status}", flush=True)
         return jsonify(ok=True, skipped=True)
 
+    # fileIds が空の場合は uploadId を代わりに使う
     if isinstance(file_ids, str):
         file_ids = [file_ids]
+
+    if not file_ids and upload_id:
+        print(f"Webhook - fileIds empty, using uploadId: {upload_id}", flush=True)
+        file_ids = [upload_id]
+
+    if not file_ids:
+        print(f"Webhook - no fileIds or uploadId found, skipping", flush=True)
+        return jsonify(ok=True, skipped=True)
 
     errors = []
     for file_id in file_ids:
         try:
-            file_name  = get_file_name(file_id)
-            detail_url = f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
+            file_name = get_file_name(file_id)
+            print(f"file_id: {file_id}, file_name: {file_name}", flush=True)
 
-            print(f"file_id: {file_id}", flush=True)
-            print(f"file_name: {file_name}", flush=True)
-            print(f"detail_url: {detail_url}", flush=True)  # ← URL確認
-
+            detail_url = (
+                f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
+            )
             blocks = [
                 {
                     "type": "section",
@@ -268,7 +277,7 @@ def webhook():
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "View details →"},
-                            "url": detail_url,   # ← accessory から actions ブロックに移動
+                            "url": detail_url,
                             "action_id": "view_details",
                         }
                     ],
