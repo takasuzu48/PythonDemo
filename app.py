@@ -113,9 +113,10 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
         "isSplit":       False,
         "isSplitExcel":  False,
         "callbackURL":   f"{RENDER_BASE_URL}/webhook",
-        "ocrModel":      "Beethoven_ENG_O5.6",
+        "ocrModel":      "Beethoven_ENG_",
         "schemaLocking": False,
         "isEphemeral":   False,
+        "schemaId":      os.environ.get("FILEAI_SCHEMA_ID", ""),  # ← 追加
     }
     if FILEAI_DIRECTORY_ID:
         payload["directoryId"] = FILEAI_DIRECTORY_ID
