@@ -17,14 +17,14 @@ SLACK_CHANNEL        = os.environ["SLACK_CHANNEL_ID"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 FILEAI_API_KEY       = os.environ["FILEAI_API_KEY"]
 FILEAI_DIRECTORY_ID  = os.environ.get("FILEAI_DIRECTORY_ID", "")
+FILEAI_SCHEMA_ID     = os.environ.get("FILEAI_SCHEMA_ID", "")
 RENDER_BASE_URL      = os.environ["RENDER_BASE_URL"]
 JST = timezone(timedelta(hours=9))
 
-# ── 処理済みイベントIDを記録（リトライ重複防止） ──────────
 processed_event_ids = set()
 
 
-# ── Slack にメッセージを送る ──────────────────────────────
+# ── Post message to Slack ─────────────────────────────────
 def post_to_slack(text, blocks=None):
     payload = {"channel": SLACK_CHANNEL, "text": text}
     if blocks:
@@ -42,7 +42,7 @@ def post_to_slack(text, blocks=None):
     return data
 
 
-# ── fileAI API からファイル名を取得 ───────────────────────
+# ── Get file name from fileAI API ─────────────────────────
 def get_file_name(file_id: str) -> str:
     url = f"https://api.orion.file.ai/prod/v1/files/{file_id}/values"
     print(f"fileAI API request - url: {url}", flush=True)
@@ -70,10 +70,10 @@ def get_file_name(file_id: str) -> str:
     return file_name
 
 
-# ── Slack リクエストの署名検証 ────────────────────────────
+# ── Verify Slack request signature ────────────────────────
 def verify_slack_signature(req) -> bool:
     signing_secret = SLACK_SIGNING_SECRET.encode("utf-8")
-    timestamp = req.headers.get("X-Slack-Request-Timestamp", "")
+    timestamp      = req.headers.get("X-Slack-Request-Timestamp", "")
     slack_signature = req.headers.get("X-Slack-Signature", "")
 
     if not timestamp or abs(time.time() - int(timestamp)) > 300:
@@ -90,7 +90,8 @@ def verify_slack_signature(req) -> bool:
     )
     return hmac.compare_digest(my_signature, slack_signature)
 
-# ── Slack からファイルをダウンロード ─────────────────────
+
+# ── Download file from Slack via files.info API ───────────
 def download_slack_file_by_id(file_id: str) -> tuple[bytes, str]:
     print(f"Fetching file info for file_id: {file_id}", flush=True)
 
@@ -103,7 +104,7 @@ def download_slack_file_by_id(file_id: str) -> tuple[bytes, str]:
     info_resp.raise_for_status()
     info = info_resp.json()
 
-    print(f"files.info full response: {info}", flush=True)  # ← 全体を出力
+    print(f"files.info full response ok: {info.get('ok')}", flush=True)
 
     if not info.get("ok"):
         raise RuntimeError(f"files.info error: {info.get('error')}")
@@ -123,33 +124,11 @@ def download_slack_file_by_id(file_id: str) -> tuple[bytes, str]:
     )
     resp.raise_for_status()
 
-    print(f"files.info download size: {len(resp.content)} bytes", flush=True)
+    print(f"Downloaded file size: {len(resp.content)} bytes", flush=True)
     return resp.content, file_type
 
-# ── Slack からファイルをダウンロード ─────────────────────
-def download_slack_file(url: str) -> bytes:
-    print(f"Downloading file from Slack - url: {url}", flush=True)
 
-    session = requests.Session()
-    session.headers.update({"Authorization": f"Bearer {SLACK_TOKEN}"})
-
-    resp = session.get(url, timeout=30, allow_redirects=True)
-
-    print(f"Slack download - status: {resp.status_code}", flush=True)
-    print(f"Slack download - final url: {resp.url}", flush=True)
-    print(f"Slack download - content-type: {resp.headers.get('Content-Type')}", flush=True)
-    print(f"Slack download - file size: {len(resp.content)} bytes", flush=True)
-
-    resp.raise_for_status()
-
-    # サイズが期待より小さい場合はfiles.info APIで再取得
-    file_id = url.split("/")[5].split("-")[1] if "/files-pri/" in url else None
-    print(f"Slack download - extracted file_id: {file_id}", flush=True)
-
-    return resp.content
-
-
-# ── fileAI にアップロード ─────────────────────────────────
+# ── Upload file to fileAI ─────────────────────────────────
 def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
     payload = {
         "fileName":      file_name,
@@ -157,13 +136,14 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
         "isSplit":       False,
         "isSplitExcel":  False,
         "callbackURL":   f"{RENDER_BASE_URL}/webhook",
-        "ocrModel":      "Beethoven_ENG_GP25.2",
+        "ocrModel":      "Beethoven_ENG_O5.6",
         "schemaLocking": False,
         "isEphemeral":   False,
-        "schemaId":      os.environ.get("FILEAI_SCHEMA_ID", ""),  # ← 追加
     }
     if FILEAI_DIRECTORY_ID:
         payload["directoryId"] = FILEAI_DIRECTORY_ID
+    if FILEAI_SCHEMA_ID:
+        payload["schemaId"] = FILEAI_SCHEMA_ID
 
     print(f"fileAI upload - payload: {payload}", flush=True)
 
@@ -184,26 +164,25 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
 
     upload_url = data.get("presignedUploadURL") or data.get("uploadUrl") or data.get("url")
     print(f"fileAI upload - uploadUrl: {upload_url}", flush=True)
-         
+
     if upload_url:
         print(f"fileAI PUT - starting upload, size: {len(file_content)} bytes", flush=True)
         put_resp = requests.put(
             upload_url,
             data=file_content,
-            headers={"Content-Type": file_type},  # ← Content-Typeのみ
+            headers={"Content-Type": file_type},
             timeout=60,
         )
         print(f"fileAI PUT - status: {put_resp.status_code}", flush=True)
         print(f"fileAI PUT - response body: {put_resp.text}", flush=True)
         put_resp.raise_for_status()
-        
     else:
         print(f"fileAI upload - presignedUploadURL not found in response", flush=True)
 
     return data
 
 
-# ── ファイル処理をバックグラウンドで実行 ─────────────────
+# ── Process file in background thread ────────────────────
 def process_file_background(file_info: dict):
     file_id   = file_info.get("id")
     file_name = file_info.get("name", "unknown")
@@ -211,39 +190,40 @@ def process_file_background(file_info: dict):
     print(f"[BG] Processing file - id:{file_id} name:{file_name}", flush=True)
 
     try:
-        # files.info API経由でダウンロード（確実にオリジナルサイズを取得）
         file_content, file_type = download_slack_file_by_id(file_id)
-
         print(f"[BG] Downloaded size: {len(file_content)} bytes (expected: {file_info.get('size')})", flush=True)
 
         result = upload_to_fileai(file_content, file_name, file_type)
         print(f"[BG] fileAI upload result: {result}", flush=True)
-        post_to_slack(f"⏳ *{file_name}* をfileAIにアップロードしました。処理完了後に通知します。")
+
+        post_to_slack(f"⏳ *{file_name}* has been uploaded to fileAI. You will be notified when processing is complete.")
 
     except Exception as e:
         print(f"[BG] Error processing file {file_name}: {e}", flush=True)
-        post_to_slack(f"❌ *{file_name}* のアップロードに失敗しました。\nエラー: {str(e)}")
+        post_to_slack(f"❌ Failed to upload *{file_name}* to fileAI.\nError: {str(e)}")
 
-# ── ⓪ヘルスチェック用（UptimeRobot対応） ──────────────────
+
+# ── ① Health check ───────────────────────────────────────
 @app.get("/health")
 def health():
     return jsonify(ok=True, status="running")
 
-# ── ① 接続確認用：Hello World ─────────────────────────────
+
+# ── ② Hello World connection test ────────────────────────
 @app.post("/hello")
 def hello():
     try:
-        post_to_slack("👋 Hello from Render + Flask! 接続確認OK")
-        return jsonify(ok=True, message="Slackに送信しました")
+        post_to_slack("👋 Hello from Render + Flask! Connection OK")
+        return jsonify(ok=True, message="Message sent to Slack")
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
 
-# ── ② Ver1：外部アプリからの通知 ─────────────────────────
+# ── ③ Ver1: Notification from external app ───────────────
 @app.post("/notify")
 def notify():
     body    = request.get_json(force=True)
-    summary = body.get("summary", "（概要なし）")
+    summary = body.get("summary", "(no summary)")
     status  = body.get("status", "info")
     url     = body.get("url", "")
     emoji   = {"success": "✅", "error": "❌"}.get(status, "⚠️")
@@ -251,15 +231,15 @@ def notify():
 
     blocks = [
         {"type": "header",
-         "text": {"type": "plain_text", "text": f"{emoji} 処理結果通知"}},
+         "text": {"type": "plain_text", "text": f"{emoji} Process Result Notification"}},
         {"type": "section",
-         "text": {"type": "mrkdwn", "text": f"*概要:* {summary}"}},
+         "text": {"type": "mrkdwn", "text": f"*Summary:* {summary}"}},
         {"type": "actions",
          "elements": [{"type": "button",
-                        "text": {"type": "plain_text", "text": "詳細を見る →"},
-                        "url": url, "style": "primary"}]},
+                        "text": {"type": "plain_text", "text": "View details →"},
+                        "url": url}]},
         {"type": "context",
-         "elements": [{"type": "mrkdwn", "text": f"実行時刻: {now} JST"}]},
+         "elements": [{"type": "mrkdwn", "text": f"Executed at: {now} JST"}]},
     ]
     try:
         post_to_slack(f"{emoji} {summary}", blocks)
@@ -268,25 +248,40 @@ def notify():
         return jsonify(ok=False, error=str(e)), 500
 
 
-# ── ③ Ver2：fileAI Webhook ────────────────────────────────
+# ── ④ Ver2: fileAI Webhook ───────────────────────────────
 @app.post("/webhook")
 def webhook():
     raw_body = request.get_data(as_text=True)
     print(f"Webhook raw body: {raw_body}", flush=True)
 
-    body      = request.get_json(force=True)
-    step      = body.get("step", "")
-    status    = body.get("status", "")
-    file_ids  = body.get("fileIds", [])
-    upload_id = body.get("uploadId", "")  # ← uploadId も取得
+    body         = request.get_json(force=True)
+    step         = body.get("step", "")
+    status       = body.get("status", "")
+    file_ids     = body.get("fileIds", [])
+    upload_id    = body.get("uploadId", "")
+    error_reason = body.get("errorReason", "")
 
     print(f"Webhook - step:{step} status:{status} file_ids:{file_ids} upload_id:{upload_id}", flush=True)
 
-    if step != "processing_finished" or status != "completed":
+    # Processing complete
+    if step == "processing_finished" and status == "completed":
+        pass
+
+    # Processing failed
+    elif step == "processing_failed" or status == "error":
+        print(f"Webhook - processing failed: {error_reason}", flush=True)
+        post_to_slack(
+            f"❌ fileAI processing failed.\n"
+            f"Upload ID: `{upload_id}`\n"
+            f"Reason: `{error_reason}`"
+        )
+        return jsonify(ok=True)
+
+    # Other steps - skip
+    else:
         print(f"Webhook - skipped. step={step}, status={status}", flush=True)
         return jsonify(ok=True, skipped=True)
 
-    # fileIds が空の場合は uploadId を代わりに使う
     if isinstance(file_ids, str):
         file_ids = [file_ids]
 
@@ -304,13 +299,11 @@ def webhook():
             file_name = get_file_name(file_id)
             print(f"file_id: {file_id}, file_name: {file_name}", flush=True)
 
-            detail_url = (
-                f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
-            )
+            detail_url = f"https://orion.file.ai/en/projects/drive/{file_id}/{file_name}"
             blocks = [
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": "📣Notification from file AI!!"},
+                    "text": {"type": "mrkdwn", "text": "📣 Notification from fileAI!!"},
                 },
                 {
                     "type": "section",
@@ -335,7 +328,7 @@ def webhook():
                 },
             ]
             fallback = (
-                f"📣Notification from file AI!!\n"
+                f"📣 Notification from fileAI!!\n"
                 f"{file_name} has been processed. "
                 f"Please click this link for more details: {detail_url}"
             )
@@ -351,43 +344,41 @@ def webhook():
     return jsonify(ok=True)
 
 
-# ── ④ Ver2：Slack Events API ──────────────────────────────
+# ── ⑤ Ver2: Slack Events API ─────────────────────────────
 @app.post("/slack/events")
 def slack_events():
-    raw_body = request.get_data(as_text=True)
-
     body = request.get_json(force=True)
 
-    # URL検証（初回設定時）
+    # URL verification on initial setup
     if body.get("type") == "url_verification":
         return jsonify(challenge=body["challenge"])
 
-    # 署名検証
+    # Verify Slack signature
     if not verify_slack_signature(request):
-        print(f"★ signature verification failed", flush=True)
+        print(f"Signature verification failed", flush=True)
         return jsonify(error="invalid signature"), 403
 
-    # リトライリクエストを無視 ← ここがポイント
+    # Ignore Slack retry requests
     if request.headers.get("X-Slack-Retry-Reason") == "http_timeout":
-        print(f"★ Slack retry request ignored", flush=True)
+        print(f"Slack retry request ignored", flush=True)
         return jsonify(ok=True)
 
-    event     = body.get("event", {})
-    event_id  = body.get("event_id", "")
+    event    = body.get("event", {})
+    event_id = body.get("event_id", "")
 
     print(f"★ /slack/events called - event_id:{event_id} type:{event.get('type')}", flush=True)
 
-    # 重複イベントを無視
+    # Ignore duplicate events
     if event_id in processed_event_ids:
-        print(f"★ duplicate event_id ignored: {event_id}", flush=True)
+        print(f"Duplicate event_id ignored: {event_id}", flush=True)
         return jsonify(ok=True)
     processed_event_ids.add(event_id)
 
     if event.get("type") != "message" or "files" not in event:
-        print(f"★ skipped - type:{event.get('type')} has_files:{'files' in event}", flush=True)
+        print(f"Skipped - type:{event.get('type')} has_files:{'files' in event}", flush=True)
         return jsonify(ok=True)
 
-    # バックグラウンドで処理してSlackに即200を返す
+    # Start background thread and return 200 immediately
     for file_info in event.get("files", []):
         thread = threading.Thread(
             target=process_file_background,
@@ -395,9 +386,9 @@ def slack_events():
             daemon=True,
         )
         thread.start()
-        print(f"★ background thread started for file: {file_info.get('name')}", flush=True)
+        print(f"Background thread started for file: {file_info.get('name')}", flush=True)
 
-    return jsonify(ok=True)  # ← 即座に200を返す
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":
