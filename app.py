@@ -14,6 +14,8 @@ app = Flask(__name__)
 
 SLACK_TOKEN          = os.environ["SLACK_BOT_TOKEN"]
 SLACK_CHANNEL        = os.environ["SLACK_CHANNEL_ID"]
+SLACK_TOKEN_B        = os.environ["SLACK_BOT_TOKEN_B"]
+SLACK_CHANNEL_B      = os.environ["SLACK_CHANNEL_ID_B"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 FILEAI_API_KEY       = os.environ["FILEAI_API_KEY"]
 FILEAI_DIRECTORY_ID  = os.environ.get("FILEAI_DIRECTORY_ID", "")
@@ -32,6 +34,23 @@ def post_to_slack(text, blocks=None):
     resp = requests.post(
         "https://slack.com/api/chat.postMessage",
         headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Slack API error: {data.get('error')}")
+    return data
+
+# ── Post message to Slack B ─────────────────────────────────
+def post_to_slack(text, blocks=None):
+    payload = {"channel": SLACK_CHANNEL_B, "text": text}
+    if blocks:
+        payload["blocks"] = blocks
+    resp = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {SLACK_TOKEN_B}"},
         json=payload,
         timeout=10,
     )
