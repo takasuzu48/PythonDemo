@@ -92,7 +92,6 @@ def verify_slack_signature(req) -> bool:
 
 # ── Slack からファイルをダウンロード ─────────────────────
 def download_slack_file_by_id(file_id: str) -> tuple[bytes, str]:
-    """files.info APIでファイル情報を取得してダウンロード"""
     print(f"Fetching file info for file_id: {file_id}", flush=True)
 
     info_resp = requests.get(
@@ -104,13 +103,17 @@ def download_slack_file_by_id(file_id: str) -> tuple[bytes, str]:
     info_resp.raise_for_status()
     info = info_resp.json()
 
-    print(f"files.info response: {info.get('file', {}).get('size')} bytes", flush=True)
+    print(f"files.info full response: {info}", flush=True)  # ← 全体を出力
+
+    if not info.get("ok"):
+        raise RuntimeError(f"files.info error: {info.get('error')}")
 
     file_obj     = info.get("file", {})
     download_url = file_obj.get("url_private_download")
     file_type    = file_obj.get("mimetype", "application/octet-stream")
 
     print(f"files.info download_url: {download_url}", flush=True)
+    print(f"files.info file size: {file_obj.get('size')} bytes", flush=True)
 
     resp = requests.get(
         download_url,
