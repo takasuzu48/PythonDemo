@@ -137,22 +137,26 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
     resp.raise_for_status()
     data = resp.json()
 
-    upload_url = data.get("uploadUrl") or data.get("url")
+    upload_url = data.get("presignedUploadURL") or data.get("uploadUrl") or data.get("url")
     print(f"fileAI upload - uploadUrl: {upload_url}", flush=True)
-
+         
     if upload_url:
         print(f"fileAI PUT - starting upload, size: {len(file_content)} bytes", flush=True)
         put_resp = requests.put(
             upload_url,
             data=file_content,
-            headers={"Content-Type": file_type},
+            headers={
+                "Content-Type": file_type,
+                "x-amz-checksum-crc32": "AAAAAA==",
+                "x-amz-sdk-checksum-algorithm": "CRC32",
+            },
             timeout=60,
         )
         print(f"fileAI PUT - status: {put_resp.status_code}", flush=True)
         print(f"fileAI PUT - response body: {put_resp.text}", flush=True)
         put_resp.raise_for_status()
     else:
-        print(f"fileAI upload - uploadUrl not found in response: {data}", flush=True)
+        print(f"fileAI upload - presignedUploadURL not found in response", flush=True)
 
     return data
 
