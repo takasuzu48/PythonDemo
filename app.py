@@ -182,6 +182,10 @@ def process_file_background(file_info: dict):
         print(f"[BG] Error processing file {file_name}: {e}", flush=True)
         post_to_slack(f"❌ *{file_name}* のアップロードに失敗しました。\nエラー: {str(e)}")
 
+# ── ⓪ヘルスチェック用（UptimeRobot対応） ──────────────────
+@app.get("/health")
+def health():
+    return jsonify(ok=True, status="running")
 
 # ── ① 接続確認用：Hello World ─────────────────────────────
 @app.post("/hello")
