@@ -161,12 +161,14 @@ def upload_to_fileai(file_content: bytes, file_name: str, file_type: str):
 
 # ── ファイル処理をバックグラウンドで実行 ─────────────────
 def process_file_background(file_info: dict):
-    print(f"[BG] file_info full: {file_info}", flush=True)  # ← 全フィールドを確認
-
     file_id      = file_info.get("id")
     file_name    = file_info.get("name", "unknown")
     file_type    = file_info.get("mimetype", "application/octet-stream")
-    download_url = file_info.get("url_private") or file_info.get("url_private_download")
+    download_url = file_info.get("url_private_download")  # ← downloadを明示的に使用
+
+    print(f"[BG] Processing file - id:{file_id} name:{file_name} size:{file_info.get('size')}", flush=True)
+    print(f"[BG] download_url: {download_url}", flush=True)
+    # 以下はそのまま
 
     print(f"[BG] file_id: {file_id}", flush=True)
     print(f"[BG] file_name: {file_name}", flush=True)
