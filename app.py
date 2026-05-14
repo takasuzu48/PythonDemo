@@ -414,15 +414,53 @@ def slack_actions():
         action_id = action.get("action_id")
 
         if action_id == "menu_upload":
-            post_to_slack_channel(
-                channel,
-                "📤 ファイルをこのチャンネルに投稿してください。自動的にfileAIへアップロードします。",
-            )
+            trigger_id = payload.get("trigger_id")
+            open_upload_modal(trigger_id)
 
         elif action_id in ("menu_history", "menu_help"):
             post_to_slack_channel(channel, "メニュー", MENU_BLOCKS)
 
     return "", 200
+
+
+def open_upload_modal(trigger_id: str):
+    modal = {
+        "type": "modal",
+        "title": {"type": "plain_text", "text": "ファイルアップロード"},
+        "close": {"type": "plain_text", "text": "閉じる"},
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*📤 ファイルのアップロード手順*",
+                },
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*1️⃣* このモーダルを閉じる\n"
+                        "*2️⃣* チャンネルのメッセージ入力欄左の 📎 をクリック\n"
+                        "*3️⃣* アップロードしたいファイルを選択して送信\n\n"
+                        "✅ 送信後、自動的にfileAIへアップロードされます。"
+                    ),
+                },
+            },
+        ],
+    }
+    resp = requests.post(
+        "https://slack.com/api/views.open",
+        headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+        json={"trigger_id": trigger_id, "view": modal},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get("ok"):
+        print(f"views.open error: {data.get('error')}", flush=True)
 
 
 def post_to_slack_channel(channel: str, text: str, blocks=None):
