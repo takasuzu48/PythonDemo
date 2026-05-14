@@ -403,18 +403,29 @@ def webhook():
 # ── ⑤ Slack Interactive Actions (Block Kit buttons) ──────
 @app.post("/slack/actions")
 def slack_actions():
+    # Read raw body and form data before signature check (prevents stream exhaustion)
+    raw_body = request.get_data(as_text=True)
+    raw_payload = request.form.get("payload", "")
+    print(f"[actions] raw_body length:{len(raw_body)} payload length:{len(raw_payload)}", flush=True)
+
     if not verify_slack_signature(request):
+        print(f"[actions] signature verification failed", flush=True)
         return jsonify(error="invalid signature"), 403
 
-    payload = json.loads(request.form.get("payload", "{}"))
-    actions = payload.get("actions", [])
-    channel = payload.get("channel", {}).get("id", SLACK_CHANNEL)
+    if not raw_payload:
+        print(f"[actions] payload is empty", flush=True)
+        return "", 200
+
+    payload    = json.loads(raw_payload)
+    actions    = payload.get("actions", [])
+    channel    = payload.get("channel", {}).get("id", SLACK_CHANNEL)
+    trigger_id = payload.get("trigger_id")
+    print(f"[actions] actions:{[a.get('action_id') for a in actions]} trigger_id:{trigger_id}", flush=True)
 
     for action in actions:
         action_id = action.get("action_id")
 
         if action_id == "menu_upload":
-            trigger_id = payload.get("trigger_id")
             open_upload_modal(trigger_id)
 
         elif action_id in ("menu_history", "menu_help"):
@@ -424,6 +435,10 @@ def slack_actions():
 
 
 def open_upload_modal(trigger_id: str):
+    print(f"[modal] open_upload_modal called - trigger_id:{trigger_id}", flush=True)
+    if not trigger_id:
+        print(f"[modal] trigger_id is None, skipping", flush=True)
+        return
     modal = {
         "type": "modal",
         "title": {"type": "plain_text", "text": "ファイルアップロード"},
@@ -457,10 +472,10 @@ def open_upload_modal(trigger_id: str):
         json={"trigger_id": trigger_id, "view": modal},
         timeout=10,
     )
+    print(f"[modal] views.open status:{resp.status_code}", flush=True)
     resp.raise_for_status()
     data = resp.json()
-    if not data.get("ok"):
-        print(f"views.open error: {data.get('error')}", flush=True)
+    print(f"[modal] views.open response: ok={data.get('ok')} error={data.get('error')}", flush=True)
 
 
 def post_to_slack_channel(channel: str, text: str, blocks=None):
