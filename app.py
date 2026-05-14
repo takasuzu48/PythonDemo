@@ -3,6 +3,7 @@ import hmac
 import hashlib
 import time
 import threading
+import json
 import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -24,6 +25,35 @@ RENDER_BASE_URL      = os.environ["RENDER_BASE_URL"]
 JST = timezone(timedelta(hours=9))
 
 processed_event_ids = set()
+upload_history = []  # {file_name, uploaded_at, file_id}
+
+MENU_BLOCKS = [
+    {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": "*📋 メニューを選択してください*"},
+    },
+    {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "📤 新しいファイルをアップロード"},
+                "action_id": "menu_upload",
+                "style": "primary",
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "📜 履歴の表示"},
+                "action_id": "menu_history",
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "❓ ヘルプ"},
+                "action_id": "menu_help",
+            },
+        ],
+    },
+]
 
 
 # ── Post message to Slack ─────────────────────────────────
@@ -214,6 +244,12 @@ def process_file_background(file_info: dict):
         result = upload_to_fileai(file_content, file_name, file_type)
         print(f"[BG] fileAI upload result: {result}", flush=True)
 
+        upload_history.append({
+            "file_name": file_name,
+            "file_id":   result.get("fileId", file_id),
+            "uploaded_at": datetime.now(JST).strftime("%Y/%m/%d %H:%M"),
+        })
+
         post_to_slack(f"⏳ *{file_name}* has been uploaded to fileAI. You will be notified when processing is complete.")
 
     except Exception as e:
@@ -364,7 +400,45 @@ def webhook():
     return jsonify(ok=True)
 
 
-# ── ⑤ Ver2: Slack Events API ─────────────────────────────
+# ── ⑤ Slack Interactive Actions (Block Kit buttons) ──────
+@app.post("/slack/actions")
+def slack_actions():
+    if not verify_slack_signature(request):
+        return jsonify(error="invalid signature"), 403
+
+    payload = json.loads(request.form.get("payload", "{}"))
+    actions = payload.get("actions", [])
+    channel = payload.get("channel", {}).get("id", SLACK_CHANNEL)
+
+    for action in actions:
+        action_id = action.get("action_id")
+
+        if action_id == "menu_upload":
+            post_to_slack_channel(
+                channel,
+                "📤 ファイルをこのチャンネルに投稿してください。自動的にfileAIへアップロードします。",
+            )
+
+        elif action_id in ("menu_history", "menu_help"):
+            post_to_slack_channel(channel, "メニュー", MENU_BLOCKS)
+
+    return "", 200
+
+
+def post_to_slack_channel(channel: str, text: str, blocks=None):
+    payload = {"channel": channel, "text": text}
+    if blocks:
+        payload["blocks"] = blocks
+    resp = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+
+# ── ⑥ Ver2: Slack Events API ─────────────────────────────
 @app.post("/slack/events")
 def slack_events():
     body = request.get_json(force=True)
@@ -394,20 +468,27 @@ def slack_events():
         return jsonify(ok=True)
     processed_event_ids.add(event_id)
 
-    if event.get("type") != "message" or "files" not in event:
-        print(f"Skipped - type:{event.get('type')} has_files:{'files' in event}", flush=True)
+    # Ignore bot messages
+    if event.get("type") != "message" or "bot_id" in event:
+        print(f"Skipped - type:{event.get('type')} bot:{event.get('bot_id')}", flush=True)
         return jsonify(ok=True)
 
-    # Start background thread and return 200 immediately
-    for file_info in event.get("files", []):
-        thread = threading.Thread(
-            target=process_file_background,
-            args=(file_info,),
-            daemon=True,
-        )
-        thread.start()
-        print(f"Background thread started for file: {file_info.get('name')}", flush=True)
+    channel = event.get("channel", SLACK_CHANNEL)
 
+    # File uploaded via menu flow → process it
+    if "files" in event:
+        for file_info in event.get("files", []):
+            thread = threading.Thread(
+                target=process_file_background,
+                args=(file_info,),
+                daemon=True,
+            )
+            thread.start()
+            print(f"Background thread started for file: {file_info.get('name')}", flush=True)
+        return jsonify(ok=True)
+
+    # Any other message → show menu
+    post_to_slack_channel(channel, "メニュー", MENU_BLOCKS)
     return jsonify(ok=True)
 
 
